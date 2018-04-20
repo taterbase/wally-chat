@@ -3,18 +3,35 @@ package main
 import (
 	"io"
 	"log"
+	"math/rand"
 	"net"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
 )
 
+type EVENT_TYPE int
+
+const (
+	USER_JOIN EVENT_TYPE = iota
+	USER_LEAVE
+	MSG_SENT
+)
+
 var (
-	endsWithReturn = regexp.MustCompile("(\r\n|\r|\n)")
+	endsWithReturn  = regexp.MustCompile("(\r\n|\r|\n)")
+	USERNAME_COLORS = []string{
+		"\033[0;36m", "\033[0;34m", "\033[0;35m",
+		"\033[0;33m", "\033[1;34m", "\033[1;32m", "\033[1;36m", "\033[1;31m",
+		"\033[1;35m", "\033[1;33m"}
+	MESSAGE_COLOR      = "\033[1;37m"
+	INTRODUCTION_COLOR = "\033[1;30m"
 )
 
 type Session struct {
 	username string
+	color    string
 	conn     net.Conn
 }
 
@@ -26,6 +43,7 @@ func (s *Session) updateUsername(username string) error {
 	username = strings.TrimSpace(username)
 	log.Println("New username", username)
 	s.username = username
+	s.color = USERNAME_COLORS[rand.Int()%len(USERNAME_COLORS)]
 	return nil
 }
 
@@ -43,12 +61,13 @@ func (s *Session) clearScreen() (err error) {
 }
 
 type Server struct {
-	sessions    []*Session
-	sessionLock sync.Mutex
+	sessions          []*Session
+	sessionLock       sync.Mutex
+	chatlog, eventlog *os.File
 }
 
-func NewServer() *Server {
-	return &Server{}
+func NewServer(chatlog, eventlog *os.File) *Server {
+	return &Server{chatlog: chatlog, eventlog: eventlog}
 }
 
 func (s *Server) Listen(addr string) error {
@@ -69,6 +88,24 @@ func (s *Server) Listen(addr string) error {
 	}
 }
 
+func (s *Server) logMessage(msg string) (err error) {
+	_, err = s.chatlog.Write([]byte(msg))
+	return err
+}
+
+func (s *Server) logEvent(event EVENT_TYPE) (err error) {
+	switch event {
+	case USER_JOIN:
+		_, err = s.eventlog.Write([]byte("user:join"))
+	case USER_LEAVE:
+		_, err = s.eventlog.Write([]byte("user:leave"))
+	case MSG_SENT:
+		_, err = s.eventlog.Write([]byte("msg:sent"))
+		//TODO(george): add default
+	}
+	return err
+}
+
 func (s *Server) raw(msg string, from *Session) (err error) {
 	for _, sesh := range s.sessions {
 		if sesh != from {
@@ -84,10 +121,15 @@ func (s *Server) broadcast(msg string, from *Session) (err error) {
 	}
 
 	if from != nil {
-		msg = from.username + ": " + msg
+		msg = from.color + from.username + ": " + MESSAGE_COLOR + msg
 	}
 
-	return s.raw(msg, from)
+	err = s.raw(msg, from)
+	if err != nil {
+		s.logMessage(msg)
+		s.logEvent(MSG_SENT)
+	}
+	return err
 }
 
 func (s *Server) appendSession(sesh *Session) error {
@@ -98,9 +140,10 @@ func (s *Server) appendSession(sesh *Session) error {
 }
 
 func (s *Server) introduce(sesh *Session) (err error) {
-	s.raw("\033[1;30m", nil)
-	s.broadcast("! "+sesh.username+" has joined", nil)
-	err = s.raw("\033[1;37m", nil)
+	s.raw(INTRODUCTION_COLOR, nil)
+	s.raw("! "+sesh.username+" has joined\n", nil)
+	s.raw(MESSAGE_COLOR, nil)
+	s.logEvent(USER_JOIN)
 	return err
 }
 
