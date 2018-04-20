@@ -4,8 +4,13 @@ import (
 	"io"
 	"log"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
+)
+
+var (
+	endsWithReturn = regexp.MustCompile("(\r\n|\r|\n)")
 )
 
 type Session struct {
@@ -29,6 +34,11 @@ func (s *Session) send(msg string) (err error) {
 	//if not add one
 	_, err = s.conn.Write([]byte(msg))
 	log.Println("BROADCASTING", msg)
+	return err
+}
+
+func (s *Session) clearScreen() (err error) {
+	_, err = s.conn.Write([]byte("\033[2J\033[1;1H"))
 	return err
 }
 
@@ -59,13 +69,25 @@ func (s *Server) Listen(addr string) error {
 	}
 }
 
-func (s *Server) broadcast(msg string, from *Session) (err error) {
+func (s *Server) raw(msg string, from *Session) (err error) {
 	for _, sesh := range s.sessions {
 		if sesh != from {
-			err = sesh.send(from.username + ": " + msg)
+			err = sesh.send(msg)
 		}
 	}
 	return err
+}
+
+func (s *Server) broadcast(msg string, from *Session) (err error) {
+	if !endsWithReturn.MatchString(msg) {
+		msg = msg + "\n"
+	}
+
+	if from != nil {
+		msg = from.username + ": " + msg
+	}
+
+	return s.raw(msg, from)
 }
 
 func (s *Server) appendSession(sesh *Session) error {
@@ -75,11 +97,19 @@ func (s *Server) appendSession(sesh *Session) error {
 	return nil
 }
 
+func (s *Server) introduce(sesh *Session) (err error) {
+	s.raw("\033[1;30m", nil)
+	s.broadcast("! "+sesh.username+" has joined", nil)
+	err = s.raw("\033[1;37m", nil)
+	return err
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
 	log.Println("New connection")
 
 	session := NewSession(conn)
 
+	session.clearScreen()
 	conn.Write([]byte("Welcome to wally chat. Please enter a username: "))
 
 	b := make([]byte, 128)
@@ -105,7 +135,9 @@ func (s *Server) handleConnection(conn net.Conn) {
 					conn.Close()
 					break
 				}
+				session.clearScreen()
 				s.appendSession(session)
+				s.introduce(session)
 				continue
 			}
 			log.Println("some dater")
