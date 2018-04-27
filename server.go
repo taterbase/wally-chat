@@ -1,7 +1,7 @@
 package main
 
 import (
-	"flag"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -16,28 +16,30 @@ const (
 	MSG_SENT
 )
 
-var (
-	sessionBufferSize = flag.Int("session_buffer_size", 20,
-		"Limit of messages held in memory buffer for session")
-)
-
 type Server struct {
 	sessions                []*Session
+	sessionBufferSize       int
 	sessionLock             sync.Mutex
 	chatlog, eventlog       *os.File
 	chatlogMtx, eventlogMtx sync.Mutex
+	usernameColors          []string
+	colorMtx                sync.Mutex
 }
 
-func NewServer(chatlog, eventlog *os.File) *Server {
-	return &Server{chatlog: chatlog, eventlog: eventlog}
+func NewServer(chatlog, eventlog *os.File, sessionBufferSize int,
+	usernameColors []string) *Server {
+	return &Server{chatlog: chatlog, eventlog: eventlog,
+		sessionBufferSize: sessionBufferSize, usernameColors: usernameColors}
 }
 
 func (s *Server) Listen(addr string) error {
-	ln, err := net.Listen("tcp", *address)
+	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		handleError(err)
 		return err
 	}
+
+	log.Println("Listening on ", addr)
 
 	for {
 		conn, err := ln.Accept()
@@ -89,8 +91,16 @@ func (s *Server) removeSession(sIdx int) {
 	s.sessions = append(s.sessions[:sIdx], s.sessions[sIdx+1:]...)
 }
 
+func (s *Server) getUsernameColor() (color string) {
+	s.colorMtx.Lock()
+	defer s.colorMtx.Unlock()
+	color = s.usernameColors[0]
+	s.usernameColors = append(s.usernameColors[1:], color)
+	return color
+}
+
 func (s *Server) handleConnection(conn net.Conn) {
-	session := NewSession(conn, *sessionBufferSize)
+	session := NewSession(conn, s.sessionBufferSize, s.getUsernameColor())
 
 	sIdx := s.appendSession(session)
 	defer s.removeSession(sIdx)

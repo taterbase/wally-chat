@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"math/rand"
 	"net"
 	"regexp"
@@ -25,13 +24,10 @@ const (
 )
 
 var (
-	endsWithReturn  = regexp.MustCompile("(\r\n|\r|\n)")
-	USERNAME_COLORS = []string{
-		"\033[0;36m", "\033[0;34m", "\033[0;35m",
-		"\033[0;33m", "\033[1;34m", "\033[1;32m", "\033[1;36m", "\033[1;31m",
-		"\033[1;35m", "\033[1;33m"}
-	MESSAGE_COLOR = "\033[1;37m"
-	EVENT_COLOR   = "\033[1;30m"
+	endsWithReturn          = regexp.MustCompile("(\r\n|\r|\n)")
+	MESSAGE_COLOR           = "\033[1;37m"
+	EVENT_COLOR             = "\033[1;30m"
+	usernameColorRandomizer = rand.New(rand.NewSource(time.Now().UnixNano()))
 )
 
 type Message struct {
@@ -61,8 +57,9 @@ type Session struct {
 	sizeMtx    sync.Mutex
 }
 
-func NewSession(conn net.Conn, bufferSize int) *Session {
-	return &Session{conn: conn, richClient: false, bufferSize: bufferSize}
+func NewSession(conn net.Conn, bufferSize int, usernameColor string) *Session {
+	return &Session{conn: conn, richClient: false, bufferSize: bufferSize,
+		color: usernameColor}
 }
 
 func (s *Session) Close() error {
@@ -113,7 +110,6 @@ func (s *Session) GetMessages() (msg, event chan Message, done chan error) {
 			}
 			if n > 0 {
 				if s.richClient {
-					fmt.Println("neato")
 					nawsUpdate, err := s.handleNawsUpdates(b[:n])
 					if err != nil {
 						done <- err
@@ -193,7 +189,6 @@ func (s *Session) getUsername() (err error) {
 		if n > 0 && b[0] != IAC {
 			username := strings.TrimSpace(string(b[:n]))
 			s.username = username
-			s.color = USERNAME_COLORS[rand.Int()%len(USERNAME_COLORS)]
 			err = s.clearScreen()
 			return err
 		}
@@ -227,7 +222,6 @@ func (s *Session) naws() error {
 			break
 		} else if b[1] == WONT && b[2] == NAWS {
 			s.richClient = false
-			fmt.Println("aww hell naws")
 			break
 		}
 	}
@@ -247,9 +241,7 @@ func (s *Session) clearScreen() (err error) {
 }
 
 func (s *Session) handleNawsUpdates(b []byte) (isNaws bool, err error) {
-	fmt.Println("cool", int(b[1]))
 	if b[0] == IAC && b[1] == SB && b[2] == NAWS {
-		fmt.Println("Even cooler")
 		s.sizeMtx.Lock()
 		defer s.sizeMtx.Unlock()
 		//update terminal size
@@ -267,7 +259,6 @@ func (s *Session) handleNawsUpdates(b []byte) (isNaws bool, err error) {
 
 		s.width = width
 		s.height = height
-		fmt.Println(width, height)
 		return true, err
 	}
 	return false, nil

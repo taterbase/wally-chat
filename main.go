@@ -13,6 +13,13 @@ var (
 		"the file to log all messages to (created if does not already exist")
 	eventlogFile = flag.String("eventlog_file", "./event.log",
 		"the file to log all events to (created if does not already exist")
+	sessionBufferSize = flag.Int("session_buffer_size", 20,
+		"Limit of messages held in memory buffer for session")
+
+	USERNAME_COLORS = []string{
+		"\033[0;34m", "\033[0;35m",
+		"\033[0;33m", "\033[1;34m", "\033[1;32m", "\033[1;36m", "\033[1;31m",
+		"\033[1;35m", "\033[1;33m"}
 )
 
 //TODO(george): Do something cleaner dude
@@ -35,6 +42,6 @@ func main() {
 		handleError(err)
 	}
 
-	server := NewServer(chatLog, eventLog)
+	server := NewServer(chatLog, eventLog, *sessionBufferSize, USERNAME_COLORS)
 	server.Listen(*address)
 }
