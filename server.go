@@ -7,18 +7,22 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/taterbase/wally-chat/session"
 )
 
-type EVENT_TYPE int
+type BROADCAST_TYPE int
 
 const (
-	USER_JOIN EVENT_TYPE = iota
-	USER_LEAVE
-	MSG_SENT
+	MESSAGE BROADCAST_TYPE = iota
+	EVENT
+
+	RECORD_SEPARATOR = "\036"
 )
 
 type Server struct {
-	sessions                []*Session
+	defaultChannel          string
+	sessions                []session.Session
 	sessionBufferSize       int
 	sessionLock             sync.Mutex
 	chatlog, eventlog       *os.File
@@ -29,10 +33,10 @@ type Server struct {
 }
 
 func NewServer(chatlog, eventlog *os.File, sessionBufferSize int,
-	usernameColors []string, minimumMessageSize int) *Server {
+	usernameColors []string, minimumMessageSize int, defaultChannel string) *Server {
 	return &Server{chatlog: chatlog, eventlog: eventlog,
 		sessionBufferSize: sessionBufferSize, usernameColors: usernameColors,
-		minimumMessageSize: minimumMessageSize}
+		minimumMessageSize: minimumMessageSize, defaultChannel: defaultChannel}
 }
 
 func (s *Server) Listen(addr string) error {
@@ -55,36 +59,25 @@ func (s *Server) Listen(addr string) error {
 	}
 }
 
-func (s *Server) logMessage(msg Message) (err error) {
+func (s *Server) logMessage(msg session.Message) (err error) {
 	s.chatlogMtx.Lock()
 	defer s.chatlogMtx.Unlock()
-	_, err = s.chatlog.Write([]byte(strconv.FormatInt(msg.T.UnixNano(), 10) + ":" +
-		msg.From.username + ":" + msg.Body))
+	_, err = s.chatlog.Write([]byte(strconv.FormatInt(msg.T.UnixNano(), 10) +
+		RECORD_SEPARATOR + msg.Channel + RECORD_SEPARATOR +
+		msg.From.Username() + RECORD_SEPARATOR + msg.Body))
 	return err
 }
 
-func (s *Server) logEvent(event EVENT_TYPE) (err error) {
-	switch event {
-	case USER_JOIN:
-		_, err = s.eventlog.Write([]byte("user:join"))
-	case USER_LEAVE:
-		_, err = s.eventlog.Write([]byte("user:leave"))
-	case MSG_SENT:
-		_, err = s.eventlog.Write([]byte("msg:sent"))
-		//TODO(george): add default
-	}
-	return err
-}
-
-func (s *Server) appendSession(sesh *Session) (sIdx int) {
+func (s *Server) appendSession(sesh session.Session) {
 	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
 	s.sessions = append(s.sessions, sesh)
-	return len(s.sessions) - 1
+	s.sessionLock.Unlock()
+	s.broadcast(session.NewMessage(sesh.Username()+" has joined",
+		sesh.Channel(), nil), EVENT)
 }
 
 // Ensures connection is closed and then removed from list of sessions
-func (s *Server) removeSession(sesh *Session) {
+func (s *Server) removeSession(sesh session.Session) {
 	s.sessionLock.Lock()
 	//TODO: make dead session lookup more efficient
 	for idx, ss := range s.sessions {
@@ -95,7 +88,8 @@ func (s *Server) removeSession(sesh *Session) {
 	}
 	s.sessionLock.Unlock()
 
-	s.event(NewMessage(sesh.username+" has left", nil))
+	s.broadcast(session.NewMessage(sesh.Username()+" has left", sesh.Channel(),
+		nil), EVENT)
 }
 
 func (s *Server) getUsernameColor() (color string) {
@@ -107,50 +101,51 @@ func (s *Server) getUsernameColor() (color string) {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	session := NewSession(conn, s.sessionBufferSize, s.getUsernameColor())
+	sesh := session.NewTelnet(conn, s.sessionBufferSize, s.getUsernameColor(),
+		s.defaultChannel)
 
-	s.appendSession(session)
-
-	msgChan, eventChan, doneChan := session.GetMessages()
-	var msg, event Message
+	msgChan, eventChan, doneChan := sesh.GetMessages()
+	s.appendSession(sesh)
+	var msg, event session.Message
 	for {
 		select {
 		case msg = <-msgChan:
-			s.broadcast(msg)
+			s.broadcast(msg, MESSAGE)
 		case event = <-eventChan:
-			s.event(event)
+			s.broadcast(event, EVENT)
 		case <-doneChan:
-			s.removeSession(session)
+			s.removeSession(sesh)
 			break
 		}
 	}
 }
 
-func (s *Server) broadcast(msg Message) {
+func (s *Server) broadcast(msg session.Message, bt BROADCAST_TYPE) {
 	if len(strings.TrimSpace(msg.Body)) < s.minimumMessageSize {
 		return
 	}
-	s.logMessage(msg)
 
-	var failedSessions []*Session
+	if bt == MESSAGE {
+		s.logMessage(msg)
+	}
+
+	var failedSessions []session.Session
+	var err error
 	s.sessionLock.Lock()
 	for _, sesh := range s.sessions {
-		err := sesh.Send(msg)
+		switch bt {
+		case MESSAGE:
+			err = sesh.SendMessage(msg)
+		case EVENT:
+			err = sesh.SendEvent(msg)
+		}
 		if err != nil {
-
+			failedSessions = append(failedSessions, sesh)
 		}
 	}
 	s.sessionLock.Unlock()
 
 	for _, sesh := range failedSessions {
 		s.removeSession(sesh)
-	}
-}
-
-func (s *Server) event(event Message) {
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-	for _, sesh := range s.sessions {
-		sesh.SendEvent(event)
 	}
 }

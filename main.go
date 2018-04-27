@@ -17,11 +17,23 @@ var (
 		"Limit of messages held in memory buffer for session")
 	minimumMessageLength = flag.Int("minimum_message_length", 1,
 		"The minimum characters required for a message")
+	defaultChannel = flag.String("default_channel", "general",
+		"the first channel a user enters when they join")
 
 	USERNAME_COLORS = []string{
-		"\033[0;34m", "\033[0;35m",
-		"\033[0;33m", "\033[1;34m", "\033[1;32m", "\033[1;36m", "\033[1;31m",
-		"\033[1;35m", "\033[1;33m"}
+		"red",
+		"green",
+		"brown",
+		"blue",
+		"purple",
+		"cyan",
+		"orange",
+		"lime",
+		"yellow",
+		"indigo",
+		"fuschia",
+		"aqua",
+	}
 )
 
 //TODO(george): Do something cleaner dude
@@ -45,6 +57,6 @@ func main() {
 	}
 
 	server := NewServer(chatLog, eventLog, *sessionBufferSize, USERNAME_COLORS,
-		*minimumMessageLength)
+		*minimumMessageLength, *defaultChannel)
 	server.Listen(*address)
 }
