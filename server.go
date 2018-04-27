@@ -72,8 +72,8 @@ func (s *Server) appendSession(sesh session.Session) {
 	s.sessionLock.Lock()
 	s.sessions = append(s.sessions, sesh)
 	s.sessionLock.Unlock()
-	s.broadcast(session.NewMessage(sesh.Username()+" has joined",
-		sesh.Channel(), nil), EVENT)
+	s.broadcast(session.NewMessage(sesh.Username()+" is now online",
+		sesh.Channel(), sesh), EVENT)
 }
 
 // Ensures connection is closed and then removed from list of sessions
@@ -88,8 +88,8 @@ func (s *Server) removeSession(sesh session.Session) {
 	}
 	s.sessionLock.Unlock()
 
-	s.broadcast(session.NewMessage(sesh.Username()+" has left", sesh.Channel(),
-		nil), EVENT)
+	s.broadcast(session.NewMessage(sesh.Username()+" has disconnected",
+		sesh.Channel(), sesh), EVENT)
 }
 
 func (s *Server) getUsernameColor() (color string) {
@@ -133,6 +133,16 @@ func (s *Server) broadcast(msg session.Message, bt BROADCAST_TYPE) {
 	var err error
 	s.sessionLock.Lock()
 	for _, sesh := range s.sessions {
+		if sesh.Channel() != msg.Channel {
+			continue
+		}
+
+		if isIgnored, ok := sesh.IgnoreList()[msg.From.Username()]; ok {
+			if isIgnored {
+				continue
+			}
+		}
+
 		switch bt {
 		case MESSAGE:
 			err = sesh.SendMessage(msg)
