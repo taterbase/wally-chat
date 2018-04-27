@@ -15,6 +15,8 @@ var (
 		"the file to log all events to (created if does not already exist")
 	sessionBufferSize = flag.Int("session_buffer_size", 20,
 		"Limit of messages held in memory buffer for session")
+	minimumMessageLength = flag.Int("minimum_message_length", 1,
+		"The minimum characters required for a message")
 
 	USERNAME_COLORS = []string{
 		"\033[0;34m", "\033[0;35m",
@@ -42,6 +44,7 @@ func main() {
 		handleError(err)
 	}
 
-	server := NewServer(chatLog, eventLog, *sessionBufferSize, USERNAME_COLORS)
+	server := NewServer(chatLog, eventLog, *sessionBufferSize, USERNAME_COLORS,
+		*minimumMessageLength)
 	server.Listen(*address)
 }

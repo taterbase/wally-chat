@@ -67,7 +67,14 @@ func (s *Session) Close() error {
 }
 
 func (s *Session) newMessage(bodyBytes []byte) Message {
-	body := string(bodyBytes)
+	filteredBodyBytes := bodyBytes[:0]
+	for _, b := range bodyBytes {
+		octet := int(b)
+		if octet >= 32 && octet <= 126 {
+			filteredBodyBytes = append(filteredBodyBytes, b)
+		}
+	}
+	body := string(filteredBodyBytes)
 	if !endsWithReturn.MatchString(body) {
 		body = body + "\r\n"
 	}

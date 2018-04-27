@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -24,12 +25,14 @@ type Server struct {
 	chatlogMtx, eventlogMtx sync.Mutex
 	usernameColors          []string
 	colorMtx                sync.Mutex
+	minimumMessageSize      int
 }
 
 func NewServer(chatlog, eventlog *os.File, sessionBufferSize int,
-	usernameColors []string) *Server {
+	usernameColors []string, minimumMessageSize int) *Server {
 	return &Server{chatlog: chatlog, eventlog: eventlog,
-		sessionBufferSize: sessionBufferSize, usernameColors: usernameColors}
+		sessionBufferSize: sessionBufferSize, usernameColors: usernameColors,
+		minimumMessageSize: minimumMessageSize}
 }
 
 func (s *Server) Listen(addr string) error {
@@ -81,14 +84,18 @@ func (s *Server) appendSession(sesh *Session) (sIdx int) {
 }
 
 // Ensures connection is closed and then removed from list of sessions
-func (s *Server) removeSession(sIdx int) {
+func (s *Server) removeSession(sesh *Session) {
 	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
+	//TODO: make dead session lookup more efficient
+	for idx, ss := range s.sessions {
+		if ss == sesh {
+			s.sessions = append(s.sessions[:idx], s.sessions[idx+1:]...)
+			break
+		}
+	}
+	s.sessionLock.Unlock()
 
-	session := s.sessions[sIdx]
-	session.Close()
-
-	s.sessions = append(s.sessions[:sIdx], s.sessions[sIdx+1:]...)
+	s.event(NewMessage(sesh.username+" has left", nil))
 }
 
 func (s *Server) getUsernameColor() (color string) {
@@ -102,8 +109,7 @@ func (s *Server) getUsernameColor() (color string) {
 func (s *Server) handleConnection(conn net.Conn) {
 	session := NewSession(conn, s.sessionBufferSize, s.getUsernameColor())
 
-	sIdx := s.appendSession(session)
-	defer s.removeSession(sIdx)
+	s.appendSession(session)
 
 	msgChan, eventChan, doneChan := session.GetMessages()
 	var msg, event Message
@@ -114,22 +120,36 @@ func (s *Server) handleConnection(conn net.Conn) {
 		case event = <-eventChan:
 			s.event(event)
 		case <-doneChan:
+			s.removeSession(session)
 			break
 		}
 	}
 }
 
 func (s *Server) broadcast(msg Message) {
+	if len(strings.TrimSpace(msg.Body)) < s.minimumMessageSize {
+		return
+	}
 	s.logMessage(msg)
+
+	var failedSessions []*Session
+	s.sessionLock.Lock()
 	for _, sesh := range s.sessions {
 		err := sesh.Send(msg)
 		if err != nil {
-			panic("TODO")
+
 		}
+	}
+	s.sessionLock.Unlock()
+
+	for _, sesh := range failedSessions {
+		s.removeSession(sesh)
 	}
 }
 
 func (s *Server) event(event Message) {
+	s.sessionLock.Lock()
+	defer s.sessionLock.Unlock()
 	for _, sesh := range s.sessions {
 		sesh.SendEvent(event)
 	}
