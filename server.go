@@ -101,6 +101,7 @@ func (s *Server) getUsernameColor() (color string) {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
+	defer conn.Close()
 	sesh := session.NewTelnet(conn, s.sessionBufferSize, s.getUsernameColor(),
 		s.defaultChannel)
 
