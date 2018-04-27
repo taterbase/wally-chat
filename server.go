@@ -49,10 +49,10 @@ func (s *Server) Listen(addr string) error {
 	}
 }
 
-func (s *Server) logMessage(msg string) (err error) {
+func (s *Server) logMessage(msg Message) (err error) {
 	s.chatlogMtx.Lock()
 	defer s.chatlogMtx.Unlock()
-	_, err = s.chatlog.Write([]byte(msg))
+	_, err = s.chatlog.Write([]byte(msg.From.username + ": " + msg.Body))
 	return err
 }
 
@@ -94,11 +94,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 	defer s.removeSession(sIdx)
 
 	msgChan, eventChan, doneChan := session.GetMessages()
-	var msg, event string
+	var msg, event Message
 	for {
 		select {
 		case msg = <-msgChan:
-			s.broadcast(msg, session)
+			s.broadcast(msg)
 		case event = <-eventChan:
 			s.event(event)
 		case <-doneChan:
@@ -107,13 +107,17 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) broadcast(msg string, session *Session) {
+func (s *Server) broadcast(msg Message) {
+	s.logMessage(msg)
 	for _, sesh := range s.sessions {
-		sesh.Send(msg, session)
+		err := sesh.Send(msg)
+		if err != nil {
+			panic("TODO")
+		}
 	}
 }
 
-func (s *Server) event(event string) {
+func (s *Server) event(event Message) {
 	for _, sesh := range s.sessions {
 		sesh.SendEvent(event)
 	}

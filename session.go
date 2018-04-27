@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 const (
@@ -33,6 +34,20 @@ var (
 	EVENT_COLOR   = "\033[1;30m"
 )
 
+type Message struct {
+	T    time.Time
+	From *Session
+	Body string
+}
+
+func NewMessage(body string, from *Session) Message {
+	return Message{
+		Body: body,
+		From: from,
+		T:    time.Now(),
+	}
+}
+
 type Session struct {
 	username   string
 	color      string
@@ -54,9 +69,18 @@ func (s *Session) Close() error {
 	return s.conn.Close()
 }
 
-func (s *Session) GetMessages() (msg, event chan string, done chan error) {
-	msg = make(chan string)
-	event = make(chan string)
+func (s *Session) newMessage(bodyBytes []byte) Message {
+	body := string(bodyBytes)
+	if !endsWithReturn.MatchString(body) {
+		body = body + "\r\n"
+	}
+
+	return NewMessage(string(body), s)
+}
+
+func (s *Session) GetMessages() (msg, event chan Message, done chan error) {
+	msg = make(chan Message)
+	event = make(chan Message)
 	done = make(chan error, 1)
 
 	//TODO: pull out into named func
@@ -73,7 +97,12 @@ func (s *Session) GetMessages() (msg, event chan string, done chan error) {
 			return
 		}
 
-		event <- s.username + " has joined"
+		event <- s.newMessage([]byte(s.username + " has joined"))
+		err = s.redrawAll()
+		if err != nil {
+			done <- err
+			return
+		}
 
 		b := make([]byte, EXPECTED_MSG_SIZE)
 		for {
@@ -97,7 +126,8 @@ func (s *Session) GetMessages() (msg, event chan string, done chan error) {
 					}
 				}
 				//TODO: clean up inputs
-				msg <- string(b[:n])
+				m := s.newMessage(b[:n])
+				msg <- m
 				err = s.redrawAll()
 				if err != nil {
 					done <- err
@@ -126,26 +156,22 @@ func (s *Session) appendToBuffer(line string) {
 	s.buffer = append([][]byte{[]byte(line)}, s.buffer[:end]...)
 }
 
-func (s *Session) Send(msg string, from *Session) (err error) {
-	if !endsWithReturn.MatchString(msg) {
-		msg = msg + "\r\n"
-	}
+func (s *Session) Send(msg Message) (err error) {
+	body := msg.Body
+	from := msg.From
 
 	if from != nil {
-		msg = from.color + from.username + ": " + MESSAGE_COLOR + msg
+		body = from.color + from.username + ": " + MESSAGE_COLOR + body
 	}
 
-	s.appendToBuffer(msg)
+	s.appendToBuffer(body)
 	return s.redrawChat()
 }
 
-func (s *Session) SendEvent(event string) (err error) {
-	if !endsWithReturn.MatchString(event) {
-		event = event + "\r\n"
-	}
-
-	event = EVENT_COLOR + event + MESSAGE_COLOR
-	s.appendToBuffer(event)
+func (s *Session) SendEvent(event Message) (err error) {
+	msg := event.Body
+	msg = EVENT_COLOR + msg + MESSAGE_COLOR
+	s.appendToBuffer(msg)
 	return s.redrawChat()
 }
 
