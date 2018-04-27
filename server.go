@@ -4,6 +4,7 @@ import (
 	"flag"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 )
 
@@ -52,7 +53,8 @@ func (s *Server) Listen(addr string) error {
 func (s *Server) logMessage(msg Message) (err error) {
 	s.chatlogMtx.Lock()
 	defer s.chatlogMtx.Unlock()
-	_, err = s.chatlog.Write([]byte(msg.From.username + ": " + msg.Body))
+	_, err = s.chatlog.Write([]byte(strconv.FormatInt(msg.T.UnixNano(), 10) + ":" +
+		msg.From.username + ":" + msg.Body))
 	return err
 }
 

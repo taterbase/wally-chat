@@ -161,7 +161,8 @@ func (s *Session) Send(msg Message) (err error) {
 	from := msg.From
 
 	if from != nil {
-		body = from.color + from.username + ": " + MESSAGE_COLOR + body
+		body = EVENT_COLOR + "[" + msg.T.Format("15:04:05") + "] " +
+			from.color + from.username + ": " + MESSAGE_COLOR + body
 	}
 
 	s.appendToBuffer(body)
