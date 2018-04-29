@@ -1,6 +1,7 @@
 # Wally Chat
  
 A simple chat server served over telnet
+[Demo](https://streamable.com/fm0y8)
 
 ## How to run
 Using flags:
