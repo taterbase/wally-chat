@@ -23,7 +23,7 @@ const (
 
 type Server struct {
 	defaultChannel     string
-	sessions           []session.Session
+	sessions           map[string]session.Session
 	sessionBufferSize  int
 	sessionLock        sync.Mutex
 	chatlog            io.Writer
@@ -38,7 +38,8 @@ func NewServer(chatlog io.Writer, sessionBufferSize int,
 	usernameColors []string, minimumMessageSize int, defaultChannel string) *Server {
 	return &Server{chatlog: chatlog, sessionBufferSize: sessionBufferSize,
 		usernameColors: usernameColors, minimumMessageSize: minimumMessageSize,
-		defaultChannel: defaultChannel}
+		defaultChannel: defaultChannel,
+		sessions:       make(map[string]session.Session)}
 }
 
 // kicks of server with appropriate address
@@ -61,6 +62,15 @@ func (s *Server) Listen(addr string) error {
 	}
 }
 
+func (s *Server) UsernameAvailable(username string) bool {
+	s.sessionLock.Lock()
+	defer s.sessionLock.Unlock()
+	if _, ok := s.sessions[username]; ok {
+		return false
+	}
+	return true
+}
+
 // function responsible for logging all messages
 func (s *Server) logMessage(msg session.Message) (err error) {
 	// avoid chat log writing races
@@ -76,7 +86,7 @@ func (s *Server) logMessage(msg session.Message) (err error) {
 // function responsible for adding new sessions to the server
 func (s *Server) appendSession(sesh session.Session) {
 	s.sessionLock.Lock()
-	s.sessions = append(s.sessions, sesh)
+	s.sessions[sesh.Username()] = sesh
 	s.sessionLock.Unlock()
 	s.broadcast(session.NewMessage(sesh.Username()+" is now online",
 		sesh.Channel(), sesh), EVENT)
@@ -85,15 +95,8 @@ func (s *Server) appendSession(sesh session.Session) {
 // Ensures connection is closed and then removed from list of sessions
 func (s *Server) removeSession(sesh session.Session) {
 	s.sessionLock.Lock()
-	//TODO: make dead session lookup more efficient
-	// could potentially use a map with sessions and session ids to quickly
-	// find and remove sessions
-	for idx, ss := range s.sessions {
-		if ss == sesh {
-			s.sessions = append(s.sessions[:idx], s.sessions[idx+1:]...)
-			break
-		}
-	}
+	sesh.Close()
+	delete(s.sessions, sesh.Username())
 	s.sessionLock.Unlock()
 
 	s.broadcast(session.NewMessage(sesh.Username()+" has disconnected",
@@ -119,7 +122,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 	sesh := session.NewTelnet(conn, s.sessionBufferSize, s.getUsernameColor(),
 		s.defaultChannel)
 
-	msgChan, eventChan, doneChan := sesh.GetMessages()
+	msgChan, eventChan, doneChan := sesh.GetMessages(s.UsernameAvailable)
 	s.appendSession(sesh)
 	var msg, event session.Message
 	for {

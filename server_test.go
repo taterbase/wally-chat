@@ -47,7 +47,7 @@ func (ms *mockSession) UsernameColor() string {
 	return "fuschia"
 }
 
-func (ms *mockSession) GetMessages() (msg, event chan session.Message, done chan error) {
+func (ms *mockSession) GetMessages(func(string) bool) (msg, event chan session.Message, done chan error) {
 	msg = make(chan session.Message)
 	event = make(chan session.Message)
 	done = make(chan error)

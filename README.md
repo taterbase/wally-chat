@@ -33,7 +33,9 @@ window, window resizing, and alerts for new messages.
 The server keeps an in memory list of sessions. If attempting to broadcast
 to a session and the result is unsuccessful we just remove the session. The
 server trusts the session metadata with regards to the channel it's in as well
-as users it would like to ignore. The server logs each message including time,
+as users it would like to ignore. 
+
+The chat server is log based and logs each message including time,
 body of message, username, as well as the channel it was sent in. It would be
 easy enough to behave like a bouncer and update users to the last messages sent
 in a channel when they joined but I ran out of time before I could implement
@@ -59,10 +61,9 @@ Sessions and Messages are json compatible for future http implementations.
 - /part (disconnect)
 
 ## Limitations
-- could use more tests
+- no effort has been put in to ensure windows compatibility
 - Does not support HTTP REST endpoints
 - does not support UTF{8,16} characters
-- inefficient session removal (has to iterate through sessions until it finds the right one to remove)
 - No existing tech to ensure horizontal scaling
 - potential race condition when a message comes in *while* typing, could break visual continuation of composed message
 - timestamps are only relative to server 
@@ -70,9 +71,8 @@ Sessions and Messages are json compatible for future http implementations.
 - escape sequence colors may render poorly on unforseen terminal setups
 - insufficient testing around terminals with _no_  NAWS capabilities (typically hardcoded ON with terminals)
 - no cooldown for new messages, could potentially overwhelm server or other clients with a malicious client
-- no duplicate username prevention
 - no security (TELNETS or passwords)
-- ignore only works on usernames, not ips
+- no way to update username after joining
 
 ## 3rd Party Libs
 - [spacemonkeygo/flagfile](https://github.com/spacemonkeygo/flagfile) (used for local file configuration loading)

@@ -125,7 +125,8 @@ func (s *Telnet) newMessage(bodyBytes []byte) Message {
 	return NewMessage(string(body), s.Channel(), s)
 }
 
-func (s *Telnet) GetMessages() (msg, event chan Message, done chan error) {
+func (s *Telnet) GetMessages(usernameAvailable func(string) bool) (msg,
+	event chan Message, done chan error) {
 	msg = make(chan Message)
 	event = make(chan Message)
 	done = make(chan error, 1)
@@ -139,7 +140,7 @@ func (s *Telnet) GetMessages() (msg, event chan Message, done chan error) {
 		return msg, event, done
 	}
 
-	err = s.getUsername()
+	err = s.getUsername(usernameAvailable)
 	if err != nil {
 		// preload done so the server removes the session
 		done <- err
@@ -252,7 +253,7 @@ func (s *Telnet) UsernameColor() string {
 	return s.color
 }
 
-func (s *Telnet) getUsername() (err error) {
+func (s *Telnet) getUsername(available func(string) bool) (err error) {
 	// clear screen for formatting
 	err = s.clearScreen()
 	if err != nil {
@@ -273,9 +274,13 @@ func (s *Telnet) getUsername() (err error) {
 
 		if n > 0 && b[0] != IAC && len(strings.TrimSpace(string(input))) != 0 {
 			username := strings.TrimSpace(string(input))
-			s.Name = username
-			err = s.clearScreen()
-			return err
+			if available(username) {
+				s.Name = username
+				err = s.clearScreen()
+				return err
+			} else {
+				s.raw([]byte("Username already taken\r\nusername: "))
+			}
 		}
 	}
 }
