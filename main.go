@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 
 	"github.com/spacemonkeygo/flagfile"
@@ -11,8 +12,6 @@ var (
 	address     = flag.String("address", ":9876", "address for chat server to listen in on")
 	chatlogFile = flag.String("chatlog_file", "./chat.log",
 		"the file to log all messages to (created if does not already exist")
-	eventlogFile = flag.String("eventlog_file", "./event.log",
-		"the file to log all events to (created if does not already exist")
 	sessionBufferSize = flag.Int("session_buffer_size", 20,
 		"Limit of messages held in memory buffer for session")
 	minimumMessageLength = flag.Int("minimum_message_length", 1,
@@ -36,27 +35,26 @@ var (
 	}
 )
 
-//TODO(george): Do something cleaner dude
-func handleError(err error) {
-	panic(err)
-}
-
 func main() {
 	flagfile.Load()
 
 	chatLog, err := os.OpenFile(*chatlogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY,
 		0644)
 	if err != nil {
-		handleError(err)
+		// this is critical to our service, panic if unable to open
+		log.Printf("Unable to open chat log file %v\n", err)
+		panic(err)
 	}
 
-	eventLog, err := os.OpenFile(*eventlogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY,
-		0644)
-	if err != nil {
-		handleError(err)
-	}
-
-	server := NewServer(chatLog, eventLog, *sessionBufferSize, USERNAME_COLORS,
+	server := NewServer(chatLog, *sessionBufferSize, USERNAME_COLORS,
 		*minimumMessageLength, *defaultChannel)
-	server.Listen(*address)
+
+	err = server.Listen(*address)
+	if err != nil {
+		// we can't do anything if we can't listen to the address, panic to
+		// exit
+		log.Printf("Unable to start server %v\n", err)
+		panic(err)
+	}
+
 }

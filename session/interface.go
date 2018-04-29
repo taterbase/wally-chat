@@ -1,5 +1,6 @@
 package session
 
+// Session interface allows us to add other types later (like http)
 type Session interface {
 	Channel() string
 	IgnoreList() map[string]bool

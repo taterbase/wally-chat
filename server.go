@@ -1,9 +1,9 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,57 +17,63 @@ const (
 	MESSAGE BROADCAST_TYPE = iota
 	EVENT
 
+	// special ascii character specifically for separating records
 	RECORD_SEPARATOR = "\036"
 )
 
 type Server struct {
-	defaultChannel          string
-	sessions                []session.Session
-	sessionBufferSize       int
-	sessionLock             sync.Mutex
-	chatlog, eventlog       *os.File
-	chatlogMtx, eventlogMtx sync.Mutex
-	usernameColors          []string
-	colorMtx                sync.Mutex
-	minimumMessageSize      int
+	defaultChannel     string
+	sessions           []session.Session
+	sessionBufferSize  int
+	sessionLock        sync.Mutex
+	chatlog            io.Writer
+	chatlogMtx         sync.Mutex
+	usernameColors     []string
+	colorMtx           sync.Mutex
+	minimumMessageSize int
 }
 
-func NewServer(chatlog, eventlog *os.File, sessionBufferSize int,
+// server creation helper method
+func NewServer(chatlog io.Writer, sessionBufferSize int,
 	usernameColors []string, minimumMessageSize int, defaultChannel string) *Server {
-	return &Server{chatlog: chatlog, eventlog: eventlog,
-		sessionBufferSize: sessionBufferSize, usernameColors: usernameColors,
-		minimumMessageSize: minimumMessageSize, defaultChannel: defaultChannel}
+	return &Server{chatlog: chatlog, sessionBufferSize: sessionBufferSize,
+		usernameColors: usernameColors, minimumMessageSize: minimumMessageSize,
+		defaultChannel: defaultChannel}
 }
 
+// kicks of server with appropriate address
 func (s *Server) Listen(addr string) error {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		handleError(err)
 		return err
 	}
 
 	log.Println("Listening on ", addr)
 
+	// basic loop for accepting new connections
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			handleError(err)
-			continue
+			return err
 		}
 
 		go s.handleConnection(conn)
 	}
 }
 
+// function responsible for logging all messages
 func (s *Server) logMessage(msg session.Message) (err error) {
+	// avoid chat log writing races
 	s.chatlogMtx.Lock()
 	defer s.chatlogMtx.Unlock()
+
 	_, err = s.chatlog.Write([]byte(strconv.FormatInt(msg.T.UnixNano(), 10) +
 		RECORD_SEPARATOR + msg.Channel + RECORD_SEPARATOR +
 		msg.From.Username() + RECORD_SEPARATOR + msg.Body))
 	return err
 }
 
+// function responsible for adding new sessions to the server
 func (s *Server) appendSession(sesh session.Session) {
 	s.sessionLock.Lock()
 	s.sessions = append(s.sessions, sesh)
@@ -80,6 +86,8 @@ func (s *Server) appendSession(sesh session.Session) {
 func (s *Server) removeSession(sesh session.Session) {
 	s.sessionLock.Lock()
 	//TODO: make dead session lookup more efficient
+	// could potentially use a map with sessions and session ids to quickly
+	// find and remove sessions
 	for idx, ss := range s.sessions {
 		if ss == sesh {
 			s.sessions = append(s.sessions[:idx], s.sessions[idx+1:]...)
@@ -92,7 +100,11 @@ func (s *Server) removeSession(sesh session.Session) {
 		sesh.Channel(), sesh), EVENT)
 }
 
+// assigns mostly unique (rotating set) color to session
 func (s *Server) getUsernameColor() (color string) {
+	// to help ensure uniqueness of username colors we lock access while
+	// distributing new colors, and then shift the array for the next
+	// session
 	s.colorMtx.Lock()
 	defer s.colorMtx.Unlock()
 	color = s.usernameColors[0]
@@ -100,6 +112,8 @@ func (s *Server) getUsernameColor() (color string) {
 	return color
 }
 
+// handles the logic of an open connection
+// meant to be spun out in a goroutine
 func (s *Server) handleConnection(conn net.Conn) {
 	defer conn.Close()
 	sesh := session.NewTelnet(conn, s.sessionBufferSize, s.getUsernameColor(),
@@ -111,51 +125,66 @@ func (s *Server) handleConnection(conn net.Conn) {
 	for {
 		select {
 		case msg = <-msgChan:
+			// new message from session
 			s.broadcast(msg, MESSAGE)
 		case event = <-eventChan:
+			// new event from session
 			s.broadcast(event, EVENT)
 		case <-doneChan:
+			// session has told us it's done, remove it
 			s.removeSession(sesh)
 			break
 		}
 	}
 }
 
+// handles logic for sending messages to appropriate sessions
 func (s *Server) broadcast(msg session.Message, bt BROADCAST_TYPE) {
 	if len(strings.TrimSpace(msg.Body)) < s.minimumMessageSize {
 		return
 	}
 
+	// if it's a message log it, otherwise don't record
 	if bt == MESSAGE {
 		s.logMessage(msg)
 	}
 
+	// we batch failed sessions for removal later. sessions are locked
+	// during broadcast so we can't remove until the lock is released
 	var failedSessions []session.Session
 	var err error
+
 	s.sessionLock.Lock()
 	for _, sesh := range s.sessions {
+		// if a message's channel is different from a session's don't show it
 		if sesh.Channel() != msg.Channel {
 			continue
 		}
 
+		// respect ignore list and don't broadcast from ignored sessions
+		// TODO: simply username based, potentially include ip at later date
 		if isIgnored, ok := sesh.IgnoreList()[msg.From.Username()]; ok {
 			if isIgnored {
 				continue
 			}
 		}
 
+		// broadcast message based on type appropriately so sessions
+		// can display with correct formatting to its user
 		switch bt {
 		case MESSAGE:
 			err = sesh.SendMessage(msg)
 		case EVENT:
 			err = sesh.SendEvent(msg)
 		}
+
 		if err != nil {
 			failedSessions = append(failedSessions, sesh)
 		}
 	}
 	s.sessionLock.Unlock()
 
+	// now that the session lock has been released remove bad sessions
 	for _, sesh := range failedSessions {
 		s.removeSession(sesh)
 	}
