@@ -19,6 +19,9 @@ minimumMessageLength = 1
 defaultChannel = general
 ```
 
+Then connect over telnet. For the above config we would connect like this
+`telnet 127.0.0.1 9876`
+
 ## My Approach
 The server only works with raw TCP and assumes a telnet connection. I did not
 get to implementing any http interfaces as I spent most of the time 
