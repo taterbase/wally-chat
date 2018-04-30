@@ -348,7 +348,7 @@ func (s *Telnet) handleNawsUpdates(b []byte) (isNaws bool, err error) {
 		s.height = height
 
 		// redraw based on new size info
-		s.redrawChat()
+		s.redrawAll()
 		return true, err
 	}
 	return false, nil
